@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-import time
 from dataclasses import dataclass
 from typing import Literal, Optional, overload
 
@@ -12,6 +11,7 @@ from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import PrefixCacheStats
 from vllm.v1.request import Request, RequestStatus
+from vllm.lite_profiler import lite_profiler
 
 logger = init_logger(__name__)
 
@@ -200,7 +200,6 @@ class KVCacheManager:
         num_lookahead_tokens: int = 0,
         delay_cache_blocks: bool = False,
         num_encoder_tokens: int = 0,
-        profile_stats: Optional[dict[str, list[int]]] = None,
     ) -> Optional[KVCacheBlocks]:
         """Add slots for a request with new tokens to append.
 
@@ -240,28 +239,6 @@ class KVCacheManager:
         if num_new_tokens == 0:
             raise ValueError("num_new_tokens must be greater than 0")
 
-        timing_enabled = profile_stats is not None
-        total_start = time.monotonic_ns() if timing_enabled else 0
-        cache_ns = 0
-        save_ns = 0
-        new_ns = 0
-
-        def _add_stat(name: str, delta_ns: int) -> None:
-            if profile_stats is None:
-                return
-            bucket = profile_stats.setdefault(name, [0, 0])
-            bucket[0] += delta_ns
-            bucket[1] += 1
-
-        def _finalize() -> None:
-            if not timing_enabled:
-                return
-            total_ns = time.monotonic_ns() - total_start
-            other_ns = total_ns - cache_ns - save_ns - new_ns
-            if other_ns < 0:
-                other_ns = 0
-            _add_stat("SCHEDULE:ALLOCATE_OTHER", other_ns)
-
         if new_computed_blocks is not None:
             new_computed_block_list = new_computed_blocks.blocks
         else:
@@ -294,7 +271,6 @@ class KVCacheManager:
 
         if num_blocks_to_allocate > self.block_pool.get_num_free_blocks():
             # Cannot allocate new blocks
-            _finalize()
             return None
 
         # Touch the computed blocks to make sure they won't be evicted.
@@ -307,28 +283,17 @@ class KVCacheManager:
 
         # Append the new computed blocks to the request blocks until now to
         # avoid the case where the new blocks cannot be allocated.
-        if timing_enabled:
-            start_ns = time.monotonic_ns()
-        self.coordinator.save_new_computed_blocks(request.request_id,
-                                                  new_computed_block_list)
-        if timing_enabled:
-            delta = time.monotonic_ns() - start_ns
-            save_ns += delta
-            _add_stat("SCHEDULE:ALLOCATE_SAVE", delta)
+        with lite_profiler.scoped("SCHEDULE:ALLOCATE_SAVE"):
+            self.coordinator.save_new_computed_blocks(request.request_id,
+                                                      new_computed_block_list)
 
-        if timing_enabled:
-            start_ns = time.monotonic_ns()
-        new_blocks = self.coordinator.allocate_new_blocks(
-            request.request_id, num_tokens_need_slot, num_encoder_tokens)
-        if timing_enabled:
-            delta = time.monotonic_ns() - start_ns
-            new_ns += delta
-            _add_stat("SCHEDULE:ALLOCATE_NEW", delta)
+        with lite_profiler.scoped("SCHEDULE:ALLOCATE_NEW"):
+            new_blocks = self.coordinator.allocate_new_blocks(
+                request.request_id, num_tokens_need_slot, num_encoder_tokens)
 
         # P/D: delay caching blocks if we have to recv from
         # remote. Update state for locally cached blocks.
         if not self.enable_caching or delay_cache_blocks:
-            _finalize()
             return KVCacheBlocks(new_blocks)
 
         # NOTE(woosuk): We want to commit (cache) up to num_computed_tokens +
@@ -337,15 +302,9 @@ class KVCacheManager:
         # at `request.num_tokens`, ensuring only "finalized" tokens are cached.
         num_tokens_to_cache = min(num_computed_tokens + num_new_tokens,
                                   request.num_tokens)
-        if timing_enabled:
-            start_ns = time.monotonic_ns()
-        self.coordinator.cache_blocks(request, num_tokens_to_cache)
-        if timing_enabled:
-            delta = time.monotonic_ns() - start_ns
-            cache_ns += delta
-            _add_stat("SCHEDULE:ALLOCATE_CACHE", delta)
+        with lite_profiler.scoped("SCHEDULE:ALLOCATE_CACHE"):
+            self.coordinator.cache_blocks(request, num_tokens_to_cache)
 
-        _finalize()
         return KVCacheBlocks(new_blocks)
 
     def free(self, request: Request) -> None:

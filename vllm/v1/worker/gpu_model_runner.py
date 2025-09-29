@@ -2168,44 +2168,18 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
-        profiling = lite_profiler.has_active_transaction()
-        update_state_ns = 0
-        prepare_input_ns = 0
-        forward_ns = 0
-        total_start = time.monotonic_ns() if profiling else 0
-
-        def _record_model_metrics() -> None:
-            if not profiling:
-                return
-            total_ns = time.monotonic_ns() - total_start
-            others_ns = total_ns - update_state_ns - prepare_input_ns - forward_ns
-            if others_ns < 0:
-                others_ns = 0
-            lite_profiler.record("MODEL:UPDATE_STATE", update_state_ns)
-            lite_profiler.record("MODEL:PREPARE_INPUT", prepare_input_ns)
-            lite_profiler.record("MODEL:FORWARD", forward_ns)
-            lite_profiler.record("MODEL:OTHERS", others_ns)
-
-        def _finalize(value):
-            _record_model_metrics()
-            return value
-
         with record_function_or_nullcontext("Preprocess"):
             with self.synchronize_input_prep():
                 # Update persistent batch states.
-                if profiling:
-                    start_ns = time.monotonic_ns()
-                self._update_states(scheduler_output)
-                if profiling:
-                    update_state_ns += time.monotonic_ns() - start_ns
+                with lite_profiler.scoped("MODEL:UPDATE_STATE"):
+                    self._update_states(scheduler_output)
 
                 if not scheduler_output.total_num_scheduled_tokens:
                     if not has_kv_transfer_group():
                         # Return empty ModelRunnerOutput if no work to do.
-                        return _finalize(EMPTY_MODEL_RUNNER_OUTPUT)
-                    return _finalize(
-                        self.kv_connector_no_forward(
-                            scheduler_output, self.vllm_config))
+                        return EMPTY_MODEL_RUNNER_OUTPUT
+                    return self.kv_connector_no_forward(
+                        scheduler_output, self.vllm_config)
                 if self.cache_config.kv_sharing_fast_prefill:
                     assert not self.input_batch.num_prompt_logprobs, (
                         "--kv-sharing-fast-prefill produces incorrect "
@@ -2213,14 +2187,11 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         "it when the requests need prompt logprobs")
 
                 # Prepare the decoder inputs.
-                if profiling:
-                    start_ns = time.monotonic_ns()
-                (attn_metadata, logits_indices, spec_decode_metadata,
-                 num_scheduled_tokens_np, spec_decode_common_attn_metadata,
-                 max_query_len, ubatch_slices, num_tokens_after_padding
-                 ) = self._prepare_inputs(scheduler_output)
-                if profiling:
-                    prepare_input_ns += time.monotonic_ns() - start_ns
+                with lite_profiler.scoped("MODEL:PREPARE_INPUT"):
+                    (attn_metadata, logits_indices, spec_decode_metadata,
+                     num_scheduled_tokens_np, spec_decode_common_attn_metadata,
+                     max_query_len, ubatch_slices, num_tokens_after_padding
+                     ) = self._prepare_inputs(scheduler_output)
 
             (
                 num_scheduled_tokens,
@@ -2259,10 +2230,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 batch_descriptor=batch_descriptor,
                 ubatch_slices=ubatch_slices,
         ), record_function_or_nullcontext("Forward"),
+              lite_profiler.scoped("MODEL:FORWARD"),
               self.maybe_get_kv_connector_output(scheduler_output) as
               kv_connector_output):
-            if profiling:
-                start_ns = time.monotonic_ns()
             model_output = self.model(
                 input_ids=input_ids,
                 positions=positions,
@@ -2270,8 +2240,6 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
-            if profiling:
-                forward_ns += time.monotonic_ns() - start_ns
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
@@ -2288,14 +2256,14 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     # Return the intermediate tensors.
                     assert isinstance(hidden_states, IntermediateTensors)
                     hidden_states.kv_connector_output = kv_connector_output
-                    return _finalize(hidden_states)
+                    return hidden_states
 
                 if self.is_pooling_model:
                     # Return the pooling output.
                     output = self._pool(hidden_states, num_scheduled_tokens,
                                         num_scheduled_tokens_np)
                     output.kv_connector_output = kv_connector_output
-                    return _finalize(output)
+                    return output
 
                 sample_hidden_states = hidden_states[logits_indices]
                 logits = self.model.compute_logits(sample_hidden_states)
@@ -2405,14 +2373,14 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         )
 
         if not self.use_async_scheduling:
-            return _finalize(output)
+            return output
 
-        return _finalize(AsyncGPUModelRunnerOutput(
+        return AsyncGPUModelRunnerOutput(
             model_runner_output=output,
             sampled_token_ids=sampler_output.sampled_token_ids,
             invalid_req_indices=invalid_req_indices,
             async_output_copy_stream=self.async_output_copy_stream,
-        ))
+        )
 
     def take_draft_token_ids(self) -> Optional[DraftTokenIds]:
         if self._draft_token_ids is None:

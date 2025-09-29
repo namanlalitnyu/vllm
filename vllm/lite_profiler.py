@@ -131,6 +131,12 @@ class LiteProfiler:
             return None
         return transaction.scope(name)
 
+    def scoped(self, name: str):
+        scope = self.scope(name)
+        if scope is None:
+            return nullcontext()
+        return scope
+
     def record(self, name: str, elapsed_ns: int, *, count: int = 1) -> None:
         transaction = self._current()
         if transaction is None:
