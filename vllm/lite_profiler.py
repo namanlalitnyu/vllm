@@ -118,6 +118,10 @@ class LiteProfiler:
             return stack[-1]
         return None
 
+    def has_active_transaction(self) -> bool:
+        stack = getattr(self._local, "stack", None)
+        return bool(stack)
+
     # Scope helpers -----------------------------------------------------
     def scope(self, name: str):
         if not self.is_enabled():
@@ -126,6 +130,12 @@ class LiteProfiler:
         if transaction is None:
             return None
         return transaction.scope(name)
+
+    def record(self, name: str, elapsed_ns: int, *, count: int = 1) -> None:
+        transaction = self._current()
+        if transaction is None:
+            return
+        transaction.record(name, elapsed_ns, count=count)
 
     # Emission ----------------------------------------------------------
     def _ensure_log_handler(self) -> None:

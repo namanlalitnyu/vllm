@@ -20,7 +20,7 @@ import zmq
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import stateless_destroy_torch_distributed_process_group
 from vllm.logger import init_logger
-from vllm.lite_profiler import context_logger
+from vllm.lite_profiler import context_logger, lite_profiler
 from vllm.logging_utils.dump_input import dump_engine_exception
 from vllm.lora.request import LoRARequest
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -282,15 +282,35 @@ class EngineCore:
         if not self.scheduler.has_requests():
             return {}, False
         with context_logger("engine_core.step") as log:
-            with log.scope("engine:schedule"):
-                scheduler_output = self.scheduler.schedule()
-            with log.scope("engine:execute_model"):
-                model_output = self.execute_model_with_error_logging(
-                    self.model_executor.execute_model,  # type: ignore
-                    scheduler_output)
-            with log.scope("engine:update"):
-                engine_core_outputs = self.scheduler.update_from_output(
-                    scheduler_output, model_output)  # type: ignore
+            profiling = lite_profiler.has_active_transaction()
+            total_start = time.monotonic_ns() if profiling else 0
+
+            schedule_start = time.monotonic_ns() if profiling else 0
+            scheduler_output = self.scheduler.schedule()
+            schedule_ns = (time.monotonic_ns() - schedule_start
+                           if profiling else 0)
+
+            model_start = time.monotonic_ns() if profiling else 0
+            model_output = self.execute_model_with_error_logging(
+                self.model_executor.execute_model,  # type: ignore
+                scheduler_output)
+            model_ns = (time.monotonic_ns() - model_start if profiling else 0)
+
+            update_start = time.monotonic_ns() if profiling else 0
+            engine_core_outputs = self.scheduler.update_from_output(
+                scheduler_output, model_output)  # type: ignore
+            update_ns = (time.monotonic_ns() - update_start
+                         if profiling else 0)
+
+            if profiling:
+                total_ns = time.monotonic_ns() - total_start
+                others_ns = total_ns - schedule_ns - model_ns - update_ns
+                if others_ns < 0:
+                    others_ns = 0
+                log.record("STEP:SCHEDULE", schedule_ns)
+                log.record("STEP:MODEL", model_ns)
+                log.record("STEP:OUTPUT", update_ns)
+                log.record("STEP:OTHERS", others_ns)
 
         return (engine_core_outputs,
                 scheduler_output.total_num_scheduled_tokens > 0)
@@ -735,22 +755,42 @@ class EngineCoreProc(EngineCore):
     def _process_input_queue(self):
         """Exits when an engine step needs to be performed."""
 
-        waited = False
-        while not self.engines_running and not self.scheduler.has_requests() \
-                and not self.batch_queue:
-            if logger.isEnabledFor(DEBUG) and self.input_queue.empty():
-                logger.debug("EngineCore waiting for work.")
-                waited = True
-            req = self.input_queue.get()
-            self._handle_client_request(*req)
+        with context_logger("engine_core.input_queue") as log:
+            profiling = lite_profiler.has_active_transaction()
+            total_start = time.monotonic_ns() if profiling else 0
+            wait_ns = 0
+            req_cnt = 0
 
-        if waited:
-            logger.debug("EngineCore loop active.")
+            waited = False
+            while not self.engines_running and not self.scheduler.has_requests() \
+                    and not self.batch_queue:
+                if logger.isEnabledFor(DEBUG) and self.input_queue.empty():
+                    logger.debug("EngineCore waiting for work.")
+                    waited = True
+                before_wait_ts = time.monotonic_ns() if profiling else 0
+                req = self.input_queue.get()
+                if profiling:
+                    wait_ns += time.monotonic_ns() - before_wait_ts
+                    req_cnt += 1
+                self._handle_client_request(*req)
 
-        # Handle any more client requests.
-        while not self.input_queue.empty():
-            req = self.input_queue.get_nowait()
-            self._handle_client_request(*req)
+            if waited:
+                logger.debug("EngineCore loop active.")
+
+            # Handle any more client requests.
+            while not self.input_queue.empty():
+                req = self.input_queue.get_nowait()
+                if profiling:
+                    req_cnt += 1
+                self._handle_client_request(*req)
+
+            if profiling and req_cnt:
+                total_ns = time.monotonic_ns() - total_start
+                process_ns = total_ns - wait_ns
+                if process_ns < 0:
+                    process_ns = 0
+                log.record("INPUT:PROCESS", process_ns, count=req_cnt)
+                log.record("INPUT:WAIT", wait_ns, count=req_cnt)
 
     def _process_engine_step(self) -> bool:
         """Called only when there are unfinished local requests."""

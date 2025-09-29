@@ -18,6 +18,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1 import (KVConnectorBase_V1,
 from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
     KVConnectorStats)
 from vllm.logger import init_logger
+from vllm.lite_profiler import context_logger, lite_profiler
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
                                                 compute_encoder_budget)
@@ -177,6 +178,10 @@ class Scheduler(SchedulerInterface):
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
 
     def schedule(self) -> SchedulerOutput:
+        with context_logger("scheduler.schedule") as log:
+            return self._schedule_impl(log)
+
+    def _schedule_impl(self, log) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
         # There's no "decoding phase" nor "prefill phase" in the scheduler.
         # Each request just has the num_computed_tokens and
@@ -187,6 +192,24 @@ class Scheduler(SchedulerInterface):
         # num_tokens_with_spec. This is general enough to cover
         # chunked prefills, prefix caching, speculative decoding,
         # and the "jump decoding" optimization in the future.
+
+        profiling = lite_profiler.has_active_transaction()
+        total_start = time.monotonic_ns() if profiling else 0
+        get_computed_blocks_ns = 0
+        get_computed_blocks_count = 0
+        allocate_profile: Optional[dict[str, list[int]]] = ({
+            "SCHEDULE:ALLOCATE_CACHE": [0, 0],
+            "SCHEDULE:ALLOCATE_SAVE": [0, 0],
+            "SCHEDULE:ALLOCATE_NEW": [0, 0],
+            "SCHEDULE:ALLOCATE_OTHER": [0, 0],
+        } if profiling else None)
+
+        def _add_allocate_stat(name: str, delta_ns: int) -> None:
+            if allocate_profile is None:
+                return
+            bucket = allocate_profile.setdefault(name, [0, 0])
+            bucket[0] += delta_ns
+            bucket[1] += 1
 
         scheduled_new_reqs: list[Request] = []
         scheduled_resumed_reqs: list[Request] = []
@@ -255,7 +278,8 @@ class Scheduler(SchedulerInterface):
                 new_blocks = self.kv_cache_manager.allocate_slots(
                     request,
                     num_new_tokens,
-                    num_lookahead_tokens=self.num_lookahead_tokens)
+                    num_lookahead_tokens=self.num_lookahead_tokens,
+                    profile_stats=allocate_profile)
                 if new_blocks is None:
                     # The request cannot be scheduled.
                     # Preempt the lowest-priority request.
@@ -379,9 +403,15 @@ class Scheduler(SchedulerInterface):
                 # Get already-cached tokens.
                 if request.num_computed_tokens == 0:
                     # Get locally-cached tokens.
+                    if profiling:
+                        start_ns = time.monotonic_ns()
                     new_computed_blocks, num_new_local_computed_tokens = \
                         self.kv_cache_manager.get_computed_blocks(
                             request)
+                    if profiling:
+                        delta = time.monotonic_ns() - start_ns
+                        get_computed_blocks_ns += delta
+                        get_computed_blocks_count += 1
 
                     # Get externally-cached tokens if using a KVConnector.
                     if self.connector is not None:
@@ -476,6 +506,7 @@ class Scheduler(SchedulerInterface):
                     num_lookahead_tokens=effective_lookahead_tokens,
                     delay_cache_blocks=load_kv_async,
                     num_encoder_tokens=num_encoder_tokens,
+                    profile_stats=allocate_profile,
                 )
 
                 if new_blocks is None:
@@ -622,6 +653,22 @@ class Scheduler(SchedulerInterface):
         if events:
             batch = KVEventBatch(ts=time.time(), events=events)
             self.kv_event_publisher.publish(batch)
+
+        if profiling:
+            allocate_total_ns = 0
+            if allocate_profile is not None:
+                for name, (ns, count) in allocate_profile.items():
+                    allocate_total_ns += ns
+                    if ns or count:
+                        log.record(name, ns, count=count or 1)
+            if get_computed_blocks_count:
+                log.record("SCHEDULE:GET_COMPUTED", get_computed_blocks_ns,
+                           count=get_computed_blocks_count)
+            total_ns = time.monotonic_ns() - total_start
+            others_ns = total_ns - allocate_total_ns - get_computed_blocks_ns
+            if others_ns < 0:
+                others_ns = 0
+            log.record("SCHEDULE:OTHERS", others_ns)
 
         self._update_after_schedule(scheduler_output)
         return scheduler_output
