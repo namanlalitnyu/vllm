@@ -31,6 +31,7 @@ from vllm.distributed.device_communicators.shm_broadcast import (Handle,
 from vllm.distributed.parallel_state import (get_dp_group, get_ep_group,
                                              get_pp_group, get_tp_group)
 from vllm.logger import init_logger
+from vllm.lite_profiler import context_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.cache import worker_receiver_cache_from_config
 from vllm.utils import (_maybe_force_spawn, decorate_logs,
@@ -663,7 +664,11 @@ class WorkerProc:
                 if self.mm_receiver_cache is not None \
                     and func.__name__ == "execute_model":
                     get_and_update_mm_cache(self.mm_receiver_cache, args)
-                output = func(*args, **kwargs)
+                if func.__name__ == "execute_model":
+                    with context_logger("worker.execute_model"):
+                        output = func(*args, **kwargs)
+                else:
+                    output = func(*args, **kwargs)
             except Exception as e:
                 # Notes have been introduced in python 3.11
                 if hasattr(e, "add_note"):

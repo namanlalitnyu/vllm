@@ -202,6 +202,8 @@ if TYPE_CHECKING:
     VLLM_USE_NCCL_SYMM_MEM: bool = False
     VLLM_NCCL_INCLUDE_PATH: Optional[str] = None
     VLLM_USE_FBGEMM: bool = False
+    VLLM_LITE_PROFILER: bool = False
+    VLLM_LITE_PROFILER_LOG_PATH: Optional[str] = None
 
 
 def get_default_cache_root():
@@ -1406,6 +1408,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Add optional nvtx scopes for profiling, disable to avoid overheads
     "VLLM_NVTX_SCOPES_FOR_PROFILING":
     lambda: bool(int(os.getenv("VLLM_NVTX_SCOPES_FOR_PROFILING", "0"))),
+
+    # Enable the lightweight timing profiler and optional log destination
+    "VLLM_LITE_PROFILER":
+    lambda: bool(int(os.getenv("VLLM_LITE_PROFILER", "0"))),
+
+    "VLLM_LITE_PROFILER_LOG_PATH":
+    lambda: os.getenv("VLLM_LITE_PROFILER_LOG_PATH", None),
 
     # Represent block hashes in KV cache events as 64-bit integers instead of
     # raw bytes. Defaults to True for backward compatibility.

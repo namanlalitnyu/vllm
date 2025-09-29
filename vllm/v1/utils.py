@@ -16,6 +16,7 @@ import torch
 from torch.autograd.profiler import record_function
 
 import vllm.envs as envs
+from vllm.lite_profiler import combine_contexts, lite_profiler
 from vllm.logger import init_logger
 from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
@@ -381,16 +382,22 @@ _PROFILER_FUNC = None
 def record_function_or_nullcontext(name: str) -> AbstractContextManager:
     global _PROFILER_FUNC
 
-    # fast path assume it is set
-    if _PROFILER_FUNC is not None:
-        return _PROFILER_FUNC(name)
+    lite_ctx = lite_profiler.scope(name)
 
-    func = contextlib.nullcontext
-    if envs.VLLM_CUSTOM_SCOPES_FOR_PROFILING:
-        func = record_function
-    elif envs.VLLM_NVTX_SCOPES_FOR_PROFILING:
-        import nvtx
-        func = nvtx.annotate
+    func = _PROFILER_FUNC
+    if func is None:
+        func = contextlib.nullcontext
+        if envs.VLLM_CUSTOM_SCOPES_FOR_PROFILING:
+            func = record_function
+        elif envs.VLLM_NVTX_SCOPES_FOR_PROFILING:
+            import nvtx
+            func = nvtx.annotate
+        _PROFILER_FUNC = func
 
-    _PROFILER_FUNC = func
-    return func(name)
+    if lite_ctx is None:
+        return func(name)
+
+    if func is contextlib.nullcontext:
+        return lite_ctx
+
+    return combine_contexts((lite_ctx, func(name)))

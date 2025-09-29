@@ -20,6 +20,7 @@ import zmq
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import stateless_destroy_torch_distributed_process_group
 from vllm.logger import init_logger
+from vllm.lite_profiler import context_logger
 from vllm.logging_utils.dump_input import dump_engine_exception
 from vllm.lora.request import LoRARequest
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -280,12 +281,16 @@ class EngineCore:
         # or finished and not yet removed from the batch.
         if not self.scheduler.has_requests():
             return {}, False
-        scheduler_output = self.scheduler.schedule()
-        model_output = self.execute_model_with_error_logging(
-            self.model_executor.execute_model,  # type: ignore
-            scheduler_output)
-        engine_core_outputs = self.scheduler.update_from_output(
-            scheduler_output, model_output)  # type: ignore
+        with context_logger("engine_core.step") as log:
+            with log.scope("engine:schedule"):
+                scheduler_output = self.scheduler.schedule()
+            with log.scope("engine:execute_model"):
+                model_output = self.execute_model_with_error_logging(
+                    self.model_executor.execute_model,  # type: ignore
+                    scheduler_output)
+            with log.scope("engine:update"):
+                engine_core_outputs = self.scheduler.update_from_output(
+                    scheduler_output, model_output)  # type: ignore
 
         return (engine_core_outputs,
                 scheduler_output.total_num_scheduled_tokens > 0)
