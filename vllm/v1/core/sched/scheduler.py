@@ -384,7 +384,7 @@ class Scheduler(SchedulerInterface):
                 # Get already-cached tokens.
                 if request.num_computed_tokens == 0:
                     # Get locally-cached tokens.
-                    with lite_profiler.scoped("SCHEDULE:GET_COMPUTED"):
+                    with lite_profiler.scoped("Scheduler:GetComputed"):
                         (new_computed_blocks,
                          num_new_local_computed_tokens) = \
                             self.kv_cache_manager.get_computed_blocks(

@@ -282,15 +282,15 @@ class EngineCore:
         if not self.scheduler.has_requests():
             return {}, False
         with context_logger("engine_core.step") as log:
-            with log.scope("STEP:SCHEDULE"):
+            with log.scope("Engine:Schedule"):
                 scheduler_output = self.scheduler.schedule()
 
-            with log.scope("STEP:MODEL"):
+            with log.scope("Engine:Execute"):
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
 
-            with log.scope("STEP:OUTPUT"):
+            with log.scope("Engine:Update"):
                 engine_core_outputs = self.scheduler.update_from_output(
                     scheduler_output, model_output)  # type: ignore
 
@@ -744,9 +744,9 @@ class EngineCoreProc(EngineCore):
                 if logger.isEnabledFor(DEBUG) and self.input_queue.empty():
                     logger.debug("EngineCore waiting for work.")
                     waited = True
-                with log.scope("INPUT:WAIT"):
+                with log.scope("Input:Wait"):
                     req = self.input_queue.get()
-                with log.scope("INPUT:PROCESS"):
+                with log.scope("Input:Process"):
                     self._handle_client_request(*req)
 
             if waited:
@@ -755,7 +755,7 @@ class EngineCoreProc(EngineCore):
             # Handle any more client requests.
             while not self.input_queue.empty():
                 req = self.input_queue.get_nowait()
-                with log.scope("INPUT:PROCESS"):
+                with log.scope("Input:Process"):
                     self._handle_client_request(*req)
 
     def _process_engine_step(self) -> bool:

@@ -283,11 +283,11 @@ class KVCacheManager:
 
         # Append the new computed blocks to the request blocks until now to
         # avoid the case where the new blocks cannot be allocated.
-        with lite_profiler.scoped("SCHEDULE:ALLOCATE_SAVE"):
+        with lite_profiler.scoped("Scheduler:AllocateSave"):
             self.coordinator.save_new_computed_blocks(request.request_id,
                                                       new_computed_block_list)
 
-        with lite_profiler.scoped("SCHEDULE:ALLOCATE_NEW"):
+        with lite_profiler.scoped("Scheduler:AllocateNew"):
             new_blocks = self.coordinator.allocate_new_blocks(
                 request.request_id, num_tokens_need_slot, num_encoder_tokens)
 
@@ -302,7 +302,7 @@ class KVCacheManager:
         # at `request.num_tokens`, ensuring only "finalized" tokens are cached.
         num_tokens_to_cache = min(num_computed_tokens + num_new_tokens,
                                   request.num_tokens)
-        with lite_profiler.scoped("SCHEDULE:ALLOCATE_CACHE"):
+        with lite_profiler.scoped("Scheduler:AllocateCache"):
             self.coordinator.cache_blocks(request, num_tokens_to_cache)
 
         return KVCacheBlocks(new_blocks)
