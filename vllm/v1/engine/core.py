@@ -282,15 +282,15 @@ class EngineCore:
         if not self.scheduler.has_requests():
             return {}, False
         with context_logger("engine_core.step") as log:
-            with log.scope("Engine:Schedule"):
+            with log.scope("Step:Schedule"):
                 scheduler_output = self.scheduler.schedule()
 
-            with log.scope("Engine:Execute"):
+            with log.scope("Step:Models"):
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
 
-            with log.scope("Engine:Update"):
+            with log.scope("Step:Output"):
                 engine_core_outputs = self.scheduler.update_from_output(
                     scheduler_output, model_output)  # type: ignore
 
