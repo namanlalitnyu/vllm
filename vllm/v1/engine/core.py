@@ -285,7 +285,7 @@ class EngineCore:
             with log.scope("Step:Schedule"):
                 scheduler_output = self.scheduler.schedule()
 
-            with log.scope("Step:Models"):
+            with log.scope("Step:Model"):
                 model_output = self.execute_model_with_error_logging(
                     self.model_executor.execute_model,  # type: ignore
                     scheduler_output)
