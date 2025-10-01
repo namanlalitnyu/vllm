@@ -24,10 +24,6 @@ from collections import defaultdict
 from typing import Dict, Iterable, List, Sequence, Tuple, TextIO
 
 
-# ---------------------------------------------------------------------------
-# Log ingestion
-
-
 def _extract_event_ns(filenames: Sequence[str]) -> Dict[str, List[int]]:
     """Collect the nanosecond timings for every scope contained in ``filenames``."""
 
@@ -58,10 +54,6 @@ def _sum_events(event_ns: Dict[str, List[int]]) -> Dict[str, int]:
     return {event: sum(values) for event, values in event_ns.items()}
 
 
-# ---------------------------------------------------------------------------
-# Tabular formatting helpers
-
-
 def _format_duration_ns(value_ns: int, total_ns: int) -> str:
     seconds = value_ns / 1_000_000_000 if value_ns else 0.0
     percent = (value_ns * 100.0 / total_ns) if total_ns else 0.0
@@ -86,10 +78,6 @@ def _render_table(title: str,
     print(" ".join("-" * w for w in widths), file=stream)
     for row in table[1:]:
         print(_fmt(row), file=stream)
-
-
-# ---------------------------------------------------------------------------
-# Event groups mirrored from the notebook prototype
 
 
 TOP_EVENTS = [
@@ -159,10 +147,6 @@ def _print_breakdown_tables(name: str,
         headers = ["Log", *events, "TOTAL"]
         rows = [_compute_table_rows(name, event_ns_sum, events)]
         _render_table(title, headers, rows, stream=stream)
-
-
-# ---------------------------------------------------------------------------
-# CLI
 
 
 def summarize_log(log_path: str, *, stream: TextIO) -> None:
