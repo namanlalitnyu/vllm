@@ -1,7 +1,6 @@
 """Summarize a single vLLM lite-profiler log in tabular form.
 
 The script consumes the JSONL records emitted by :mod:`vllm.lite_profiler`
-and prints human-readable tables that mirror the notebook-based analysis.
 It expects log lines prefixed with ``===LITE`` where the payload contains a
 ``metrics`` dictionary whose values are ``{"ns": int, "count": int}``.
 

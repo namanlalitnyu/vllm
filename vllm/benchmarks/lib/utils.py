@@ -91,6 +91,11 @@ def maybe_emit_lite_profiler_report(log_path: str | None = None) -> None:
     if not effective_log:
         return
     if not os.path.exists(effective_log):
+        print(
+            "Lite profiler log not found. Ensure the profiled process sets "
+            "VLLM_LITE_PROFILER and writes to the expected path.",
+            file=sys.stderr,
+        )
         return
 
     try:
