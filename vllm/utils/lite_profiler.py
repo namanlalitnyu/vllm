@@ -1,13 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Minimal helpers for opt-in lightweight timing collection."""
 from __future__ import annotations
 
 import json
 import logging
 import os
+import sys
 import threading
 import time
+from collections.abc import Iterable
 from contextlib import ExitStack, contextmanager, nullcontext
-from typing import Dict, Iterable, Optional
+from typing import Dict, Optional
 
 import vllm.envs as envs
 from vllm.logger import init_logger
@@ -16,7 +20,8 @@ _PREFIX = "===LITE"
 
 
 class _LiteScope:
-    def __init__(self, transaction: "_LiteTransaction", name: str) -> None:
+
+    def __init__(self, transaction: _LiteTransaction, name: str) -> None:
         self._transaction = transaction
         self._name = name
         self._start_ns: Optional[int] = None
@@ -33,12 +38,13 @@ class _LiteScope:
 
 
 class _LiteTransaction:
-    def __init__(self, profiler: "LiteProfiler", tag: str) -> None:
+
+    def __init__(self, profiler: LiteProfiler, tag: str) -> None:
         self._profiler = profiler
         self.tag = tag
         self._metrics: Dict[str, list[int]] = {}
 
-    def __enter__(self) -> "_LiteTransaction":
+    def __enter__(self) -> _LiteTransaction:
         self._profiler._push(self)
         return self
 
@@ -67,7 +73,8 @@ class _LiteTransaction:
 
 
 class _NullTransaction:
-    def __enter__(self) -> "_NullTransaction":
+
+    def __enter__(self) -> _NullTransaction:
         return self
 
     def __exit__(self, exc_type, exc, exc_tb) -> bool:
@@ -81,6 +88,7 @@ class _NullTransaction:
 
 
 class LiteProfiler:
+
     def __init__(self) -> None:
         self._local = threading.local()
         self._lock = threading.Lock()
@@ -190,3 +198,39 @@ def combine_contexts(contexts: Iterable):
         for ctx in contexts:
             stack.enter_context(ctx)
         yield
+
+
+def maybe_emit_lite_profiler_report(log_path: str | None = None) -> None:
+    """Print a lite-profiler summary when profiling is enabled."""
+
+    if not envs.VLLM_LITE_PROFILER:
+        return
+
+    effective_log = log_path or envs.VLLM_LITE_PROFILER_LOG_PATH
+    if not effective_log:
+        return
+    if not os.path.exists(effective_log):
+        print(
+            "Lite profiler log not found. Ensure the profiled process sets "
+            "VLLM_LITE_PROFILER and writes to the expected path.",
+            file=sys.stderr,
+        )
+        return
+
+    try:
+        from vllm.utils import lite_profiler_report
+    except Exception as exc:  # pragma: no cover - import error should not crash
+        print(
+            f"Failed to import lite profiler report helper: {exc}",
+            file=sys.stderr,
+        )
+        return
+
+    print(f"\nLite profiler summary ({effective_log}):")
+    try:
+        lite_profiler_report.summarize_log(effective_log, stream=sys.stdout)
+    except Exception as exc:  # pragma: no cover - avoid crashing benchmarks
+        print(
+            f"Failed to summarize lite profiler log {effective_log}: {exc}",
+            file=sys.stderr,
+        )

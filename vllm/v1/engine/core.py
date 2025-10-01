@@ -20,7 +20,6 @@ import zmq
 from vllm.config import ParallelConfig, VllmConfig
 from vllm.distributed import stateless_destroy_torch_distributed_process_group
 from vllm.logger import init_logger
-from vllm.lite_profiler import context_logger
 from vllm.logging_utils.dump_input import dump_engine_exception
 from vllm.lora.request import LoRARequest
 from vllm.multimodal import MULTIMODAL_REGISTRY
@@ -30,6 +29,7 @@ from vllm.transformers_utils.config import (
     maybe_register_config_serialize_by_value)
 from vllm.utils import (decorate_logs, get_hash_fn_by_name, make_zmq_socket,
                         resolve_obj_by_qualname, set_process_title)
+from vllm.utils.lite_profiler import context_logger
 from vllm.v1.core.kv_cache_utils import (BlockHash,
                                          generate_scheduler_kv_cache_config,
                                          get_kv_cache_configs,

@@ -6,12 +6,12 @@ from typing import Literal, Optional, overload
 
 from vllm.distributed.kv_events import KVCacheEvent
 from vllm.logger import init_logger
+from vllm.utils.lite_profiler import lite_profiler
 from vllm.v1.core.kv_cache_coordinator import get_kv_cache_coordinator
 from vllm.v1.core.kv_cache_utils import KVCacheBlock
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import PrefixCacheStats
 from vllm.v1.request import Request, RequestStatus
-from vllm.lite_profiler import lite_profiler
 
 logger = init_logger(__name__)
 

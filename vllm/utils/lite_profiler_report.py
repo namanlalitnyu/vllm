@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Summarize a single vLLM lite-profiler log in tabular form.
 
 The script consumes the JSONL records emitted by :mod:`vllm.lite_profiler`
@@ -20,7 +22,8 @@ import json
 import os
 import sys
 from collections import defaultdict
-from typing import Dict, Iterable, List, Sequence, Tuple, TextIO
+from collections.abc import Iterable, Sequence
+from typing import Dict, List, TextIO
 
 
 def _extract_event_ns(filenames: Sequence[str]) -> Dict[str, List[int]]:
@@ -29,13 +32,14 @@ def _extract_event_ns(filenames: Sequence[str]) -> Dict[str, List[int]]:
     all_event_ns: Dict[str, List[int]] = defaultdict(list)
     for filename in filenames:
         try:
-            with open(filename, "r", encoding="utf-8") as f:
+            with open(filename, encoding="utf-8") as f:
                 for raw_line in f:
                     line = raw_line.lstrip()
                     if not line.startswith("===LITE "):
                         continue
                     try:
-                        payload = json.loads(line.split("===LITE ", 1)[1].strip())
+                        payload = json.loads(
+                            line.split("===LITE ", 1)[1].strip())
                     except json.JSONDecodeError:
                         continue
                     metrics = payload.get("metrics")
@@ -59,11 +63,8 @@ def _format_duration_ns(value_ns: int, total_ns: int) -> str:
     return f"{seconds:.2f}s ({percent:.2f}%)"
 
 
-def _render_table(title: str,
-                  headers: Sequence[str],
-                  rows: Iterable[Sequence[str]],
-                  *,
-                  stream: TextIO) -> None:
+def _render_table(title: str, headers: Sequence[str],
+                  rows: Iterable[Sequence[str]], *, stream: TextIO) -> None:
     table = [list(headers)] + [list(row) for row in rows]
     widths = [max(len(row[i]) for row in table) for i in range(len(headers))]
 
@@ -133,9 +134,7 @@ def _compute_table_rows(
     return cells
 
 
-def _print_breakdown_tables(name: str,
-                            event_ns_sum: Dict[str, int],
-                            *,
+def _print_breakdown_tables(name: str, event_ns_sum: Dict[str, int], *,
                             stream: TextIO) -> None:
     for title, events in (
         ("Breakdown (non-forward events)", NON_FORWARD_EVENTS),
@@ -154,7 +153,6 @@ def summarize_log(log_path: str, *, stream: TextIO) -> None:
 
     available_events = sorted(event_ns_sum)
     if available_events:
-        print("Available events:", file=stream)
         print(", ".join(available_events), file=stream)
 
     _print_breakdown_tables(os.path.basename(log_path),
@@ -167,10 +165,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "log_path",
         nargs="?",
-        help=(
-            "Lite-profiler log to summarise. Defaults to VLLM_LITE_PROFILER_LOG_PATH"
-            " when omitted."
-        ),
+        help=
+        ("Lite-profiler log to summarise. Defaults to VLLM_LITE_PROFILER_LOG_PATH"
+         " when omitted."),
     )
     return parser.parse_args(argv)
 
@@ -189,4 +186,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

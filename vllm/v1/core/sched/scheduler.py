@@ -18,8 +18,8 @@ from vllm.distributed.kv_transfer.kv_connector.v1 import (KVConnectorBase_V1,
 from vllm.distributed.kv_transfer.kv_connector.v1.metrics import (
     KVConnectorStats)
 from vllm.logger import init_logger
-from vllm.lite_profiler import context_logger, lite_profiler
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
+from vllm.utils.lite_profiler import context_logger, lite_profiler
 from vllm.v1.core.encoder_cache_manager import (EncoderCacheManager,
                                                 compute_encoder_budget)
 from vllm.v1.core.kv_cache_manager import KVCacheBlocks, KVCacheManager

@@ -14,11 +14,11 @@ from tqdm import tqdm
 
 import vllm.envs as envs
 from vllm.benchmarks.lib.utils import (convert_to_pytorch_benchmark_format,
-                                       maybe_emit_lite_profiler_report,
                                        write_to_json)
 from vllm.engine.arg_utils import EngineArgs
 from vllm.inputs import PromptType
 from vllm.sampling_params import BeamSearchParams
+from vllm.utils.lite_profiler import maybe_emit_lite_profiler_report
 
 
 def save_to_pytorch_benchmark_format(args: argparse.Namespace,

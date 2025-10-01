@@ -43,9 +43,9 @@ from vllm.benchmarks.lib.endpoint_request_func import (
     RequestFuncOutput)
 from vllm.benchmarks.lib.ready_checker import wait_for_endpoint
 from vllm.benchmarks.lib.utils import (convert_to_pytorch_benchmark_format,
-                                       maybe_emit_lite_profiler_report,
                                        write_to_json)
 from vllm.transformers_utils.tokenizer import get_tokenizer
+from vllm.utils.lite_profiler import maybe_emit_lite_profiler_report
 
 MILLISECONDS_TO_SECONDS_CONVERSION = 1000
 

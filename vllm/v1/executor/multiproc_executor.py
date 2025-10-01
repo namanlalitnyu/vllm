@@ -31,12 +31,12 @@ from vllm.distributed.device_communicators.shm_broadcast import (Handle,
 from vllm.distributed.parallel_state import (get_dp_group, get_ep_group,
                                              get_pp_group, get_tp_group)
 from vllm.logger import init_logger
-from vllm.lite_profiler import context_logger
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.multimodal.cache import worker_receiver_cache_from_config
 from vllm.utils import (_maybe_force_spawn, decorate_logs,
                         get_distributed_init_method, get_loopback_ip,
                         get_mp_context, get_open_port, set_process_title)
+from vllm.utils.lite_profiler import context_logger
 from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.executor.abstract import Executor, FailureCallback
 from vllm.v1.executor.utils import get_and_update_mm_cache

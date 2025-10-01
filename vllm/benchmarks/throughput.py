@@ -24,7 +24,6 @@ from vllm.benchmarks.datasets import (AIMODataset, BurstGPTDataset,
                                       ShareGPTDataset, SonnetDataset,
                                       VisionArenaDataset)
 from vllm.benchmarks.lib.utils import (convert_to_pytorch_benchmark_format,
-                                       maybe_emit_lite_profiler_report,
                                        write_to_json)
 from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
 from vllm.inputs import TextPrompt, TokensPrompt
@@ -32,6 +31,7 @@ from vllm.lora.request import LoRARequest
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import BeamSearchParams
 from vllm.utils import merge_async_iterators
+from vllm.utils.lite_profiler import maybe_emit_lite_profiler_report
 
 
 def run_vllm(
