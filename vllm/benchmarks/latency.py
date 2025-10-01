@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 import vllm.envs as envs
 from vllm.benchmarks.lib.utils import (convert_to_pytorch_benchmark_format,
+                                       maybe_emit_lite_profiler_report,
                                        write_to_json)
 from vllm.engine.arg_utils import EngineArgs
 from vllm.inputs import PromptType
@@ -168,3 +169,5 @@ def main(args: argparse.Namespace):
         with open(args.output_json, "w") as f:
             json.dump(results, f, indent=4)
         save_to_pytorch_benchmark_format(args, results)
+
+    maybe_emit_lite_profiler_report()

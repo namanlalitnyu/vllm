@@ -1,35 +1,27 @@
-"""Summarize vLLM lite-profiler logs in tabular form.
+"""Summarize a single vLLM lite-profiler log in tabular form.
 
-This script converts the JSONL records emitted by :mod:`vllm.lite_profiler`
-into human-readable tables that match the notebook workflow used during
-development.  It expects log lines prefixed with ``===LITE`` where the payload
-contains a ``metrics`` dictionary whose values are ``{"ns": int, "count": int}``.
+The script consumes the JSONL records emitted by :mod:`vllm.lite_profiler`
+and prints human-readable tables that mirror the notebook-based analysis.
+It expects log lines prefixed with ``===LITE`` where the payload contains a
+``metrics`` dictionary whose values are ``{"ns": int, "count": int}``.
 
 Usage examples::
 
     # Use the log file pointed to by VLLM_LITE_PROFILER_LOG_PATH
     python -m tools.lite_profiler_report
 
-    # Compare two runs with custom names
-    python -m tools.lite_profiler_report \
-        --group opt125m=/tmp/opt.log --group llama3=/tmp/llama3.log
-
-    # Aggregate multiple shards under one name
-    python -m tools.lite_profiler_report \
-        --group blended=/tmp/run_*.log
-
-When no groups are supplied the script falls back to the current value of
-``VLLM_LITE_PROFILER_LOG_PATH``.
+    # Provide an explicit path
+    python -m tools.lite_profiler_report /tmp/vllm-lite-profiler.log
 """
 
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
+import sys
 from collections import defaultdict
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple, TextIO
 
 
 # ---------------------------------------------------------------------------
@@ -76,21 +68,24 @@ def _format_duration_ns(value_ns: int, total_ns: int) -> str:
     return f"{seconds:.2f}s ({percent:.2f}%)"
 
 
-def _render_table(title: str, headers: Sequence[str], rows: Iterable[Sequence[str]]
-                  ) -> None:
+def _render_table(title: str,
+                  headers: Sequence[str],
+                  rows: Iterable[Sequence[str]],
+                  *,
+                  stream: TextIO) -> None:
     table = [list(headers)] + [list(row) for row in rows]
     widths = [max(len(row[i]) for row in table) for i in range(len(headers))]
 
-    print(f"\n{title}")
-    print("-" * sum(widths) + "-" * (len(widths) - 1))
+    print(f"\n{title}", file=stream)
+    print("-" * sum(widths) + "-" * (len(widths) - 1), file=stream)
 
     def _fmt(row: Sequence[str]) -> str:
         return " ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
 
-    print(_fmt(table[0]))
-    print(" ".join("-" * w for w in widths))
+    print(_fmt(table[0]), file=stream)
+    print(" ".join("-" * w for w in widths), file=stream)
     for row in table[1:]:
-        print(_fmt(row))
+        print(_fmt(row), file=stream)
 
 
 # ---------------------------------------------------------------------------
@@ -138,12 +133,12 @@ NON_FORWARD_EVENTS = [
 
 
 def _compute_table_rows(
-    group_name: str,
+    name: str,
     event_ns_sum: Dict[str, int],
     events: Sequence[str],
 ) -> List[str]:
     total_ns = sum(event_ns_sum.get(event, 0) for event in events)
-    cells = [group_name]
+    cells = [name]
     for event in events:
         cells.append(_format_duration_ns(event_ns_sum.get(event, 0), total_ns))
     total_seconds = total_ns / 1_000_000_000 if total_ns else 0.0
@@ -151,60 +146,47 @@ def _compute_table_rows(
     return cells
 
 
-def _print_breakdown_tables(
-    groups: Sequence[Tuple[str, Dict[str, int]]],
-) -> None:
+def _print_breakdown_tables(name: str,
+                            event_ns_sum: Dict[str, int],
+                            *,
+                            stream: TextIO) -> None:
     for title, events in (
         ("Breakdown (non-forward events)", NON_FORWARD_EVENTS),
         ("Schedule breakdown", SCHEDULE_EVENTS),
         ("Model events breakdown", MODEL_EVENTS),
         ("Topline events", TOP_EVENTS),
     ):
-        headers = ["Group", *events, "TOTAL"]
-        rows = [
-            _compute_table_rows(name, event_ns_sum, events)
-            for name, event_ns_sum in groups
-        ]
-        _render_table(title, headers, rows)
+        headers = ["Log", *events, "TOTAL"]
+        rows = [_compute_table_rows(name, event_ns_sum, events)]
+        _render_table(title, headers, rows, stream=stream)
 
 
 # ---------------------------------------------------------------------------
 # CLI
 
 
-def _expand_group_arg(arg: str) -> Tuple[str, List[str]]:
-    if "=" not in arg:
-        raise ValueError("Group arguments must use the NAME=PATH[,PATH...] syntax")
-    name, raw_paths = arg.split("=", 1)
-    if not name:
-        raise ValueError("Group name cannot be empty")
-    paths: List[str] = []
-    for pattern in raw_paths.split(","):
-        pattern = pattern.strip()
-        if not pattern:
-            continue
-        expanded = sorted(glob.glob(pattern)) or [pattern]
-        paths.extend(expanded)
-    if not paths:
-        raise ValueError(f"No log files matched for group '{name}'")
-    return name, paths
+def summarize_log(log_path: str, *, stream: TextIO) -> None:
+    event_ns = _extract_event_ns([log_path])
+    event_ns_sum = _sum_events(event_ns)
+
+    available_events = sorted(event_ns_sum)
+    if available_events:
+        print("Available events:", file=stream)
+        print(", ".join(available_events), file=stream)
+
+    _print_breakdown_tables(os.path.basename(log_path),
+                            event_ns_sum,
+                            stream=stream)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--group",
-        action="append",
-        default=[],
-        metavar="NAME=PATH[,PATH...]",
-        help="Named group of lite-profiler logs to aggregate",
-    )
-    parser.add_argument(
-        "--log",
-        default=None,
+        "log_path",
+        nargs="?",
         help=(
-            "Single lite-profiler log to summarise. Defaults to "
-            "VLLM_LITE_PROFILER_LOG_PATH when omitted and no --group is provided."
+            "Lite-profiler log to summarise. Defaults to VLLM_LITE_PROFILER_LOG_PATH"
+            " when omitted."
         ),
     )
     return parser.parse_args(argv)
@@ -213,28 +195,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
 
-    groups: List[Tuple[str, Dict[str, int]]] = []
+    log_path = args.log_path or os.getenv("VLLM_LITE_PROFILER_LOG_PATH")
+    if not log_path:
+        raise SystemExit(
+            "No log file specified. Provide LOG_PATH or set VLLM_LITE_PROFILER_LOG_PATH"
+        )
 
-    if args.group:
-        for raw_group in args.group:
-            name, paths = _expand_group_arg(raw_group)
-            event_ns = _extract_event_ns(paths)
-            groups.append((name, _sum_events(event_ns)))
-    else:
-        log_path = args.log or os.getenv("VLLM_LITE_PROFILER_LOG_PATH")
-        if not log_path:
-            raise SystemExit(
-                "No log file specified. Use --log or set VLLM_LITE_PROFILER_LOG_PATH"
-            )
-        event_ns = _extract_event_ns([log_path])
-        groups.append((os.path.basename(log_path), _sum_events(event_ns)))
-
-    available_events = sorted({event for _, summary in groups for event in summary})
-    if available_events:
-        print("Available events:")
-        print(", ".join(available_events))
-
-    _print_breakdown_tables(groups)
+    summarize_log(log_path, stream=sys.stdout)
 
 
 if __name__ == "__main__":

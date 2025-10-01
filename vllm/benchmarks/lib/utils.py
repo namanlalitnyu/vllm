@@ -5,6 +5,7 @@ import argparse
 import json
 import math
 import os
+import sys
 from typing import Any
 
 
@@ -77,4 +78,35 @@ def write_to_json(filename: str, records: list) -> None:
             f,
             cls=InfEncoder,
             default=lambda o: f"<{type(o).__name__} is not JSON serializable>",
+        )
+
+
+def maybe_emit_lite_profiler_report(log_path: str | None = None) -> None:
+    """Print a lite-profiler summary when profiling is enabled."""
+
+    if not os.environ.get("VLLM_LITE_PROFILER"):
+        return
+
+    effective_log = log_path or os.environ.get("VLLM_LITE_PROFILER_LOG_PATH")
+    if not effective_log:
+        return
+    if not os.path.exists(effective_log):
+        return
+
+    try:
+        from tools import lite_profiler_report
+    except Exception as exc:  # pragma: no cover - import error should not crash
+        print(
+            f"Failed to import lite profiler report helper: {exc}",
+            file=sys.stderr,
+        )
+        return
+
+    print(f"\nLite profiler summary ({effective_log}):")
+    try:
+        lite_profiler_report.summarize_log(effective_log, stream=sys.stdout)
+    except Exception as exc:  # pragma: no cover - avoid crashing benchmarks
+        print(
+            f"Failed to summarize lite profiler log {effective_log}: {exc}",
+            file=sys.stderr,
         )
